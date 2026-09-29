@@ -140,6 +140,15 @@ Laboratorio1/
 
 ## Cómo ejecutar desde cero
 
+### 0. Clonar el repositorio
+
+```bash
+git clone https://github.com/JosuePanke/ciencia-de-datos.git
+cd ciencia-de-datos/laboratorios/semana-07
+```
+
+Todos los comandos siguientes se ejecutan dentro de la carpeta semana-07.
+
 ### 1. Preparar Snowflake
 
 En un Worksheet de Snowflake, abre [infra/snowflake/00_setup.sql](infra/snowflake/00_setup.sql),
@@ -176,21 +185,163 @@ Resultado esperado: Conexión OK: ('NYC_SVC', 'NYC_ROLE', 'NYC_WH').
 
 ```bash
 docker compose up -d
-docker compose ps          # kestra-db (healthy) y kestra (running)
-docker compose build dbt   # construye la imagen de dbt
+docker compose ps
+docker compose build dbt
 ```
 
-Abre Kestra en http://localhost:8080.
+Abre Kestra en http://localhost:8080. La primera vez, Kestra pide crear un usuario local (email y contraseña).
 
 ### 5. Ingesta con Kestra (→ BRONZE)
 
-Los flows se crean en la interfaz de Kestra (Flows → Create) y Kestra los guarda en su base de datos,
+Los flows se crean en la interfaz de Kestra y Kestra los guarda en su base de datos,
 dentro del volumen de Docker kestra-db-data. Hay dos flows en el namespace lab1.nyc_taxi:
 
 - ingesta_yellow_mes: carga UN mes a BRONZE (input periodo, formato AAAA-MM).
 - ingesta_yellow_todos: un ForEach sobre los 20 periodos (de 2 en 2) que llama a ingesta_yellow_mes como Subflow.
 
-Ejecuta ingesta_yellow_todos. Cada ejecución de un mes hace lo siguiente:
+Para crearlos: en Kestra ve a Flows → Create, borra el ejemplo, pega el YAML y haz clic en Save.
+Crea primero ingesta_yellow_mes y después ingesta_yellow_todos.
+
+Flow ingesta_yellow_mes:
+
+```yaml
+id: ingesta_yellow_mes
+namespace: lab1.nyc_taxi
+description: Descarga un mes de NYC Yellow Taxi y lo carga en NYC_TAXI.BRONZE.YELLOW_TRIPS
+
+inputs:
+  - id: periodo
+    type: STRING
+    defaults: "2025-01"
+    description: Mes a cargar en formato AAAA-MM
+
+variables:
+  archivo: "yellow_tripdata_{{ inputs.periodo }}.parquet"
+
+tasks:
+  - id: crear_objetos
+    type: io.kestra.plugin.jdbc.snowflake.Queries
+    sql: |
+      CREATE FILE FORMAT IF NOT EXISTS NYC_TAXI.BRONZE.PARQUET_FF
+        TYPE = PARQUET
+        USE_LOGICAL_TYPE = TRUE;
+
+      CREATE STAGE IF NOT EXISTS NYC_TAXI.BRONZE.TLC_STAGE
+        FILE_FORMAT = NYC_TAXI.BRONZE.PARQUET_FF;
+
+      CREATE TABLE IF NOT EXISTS NYC_TAXI.BRONZE.YELLOW_TRIPS (
+        VENDORID               NUMBER,
+        TPEP_PICKUP_DATETIME   TIMESTAMP_NTZ,
+        TPEP_DROPOFF_DATETIME  TIMESTAMP_NTZ,
+        PASSENGER_COUNT        FLOAT,
+        TRIP_DISTANCE          FLOAT,
+        RATECODEID             FLOAT,
+        STORE_AND_FWD_FLAG     VARCHAR,
+        PULOCATIONID           NUMBER,
+        DOLOCATIONID           NUMBER,
+        PAYMENT_TYPE           NUMBER,
+        FARE_AMOUNT            FLOAT,
+        EXTRA                  FLOAT,
+        MTA_TAX                FLOAT,
+        TIP_AMOUNT             FLOAT,
+        TOLLS_AMOUNT           FLOAT,
+        IMPROVEMENT_SURCHARGE  FLOAT,
+        TOTAL_AMOUNT           FLOAT,
+        CONGESTION_SURCHARGE   FLOAT,
+        AIRPORT_FEE            FLOAT,
+        CBD_CONGESTION_FEE     FLOAT,
+        SOURCE_FILE            VARCHAR,
+        LOADED_AT              TIMESTAMP_LTZ
+      );
+
+  - id: descargar
+    type: io.kestra.plugin.core.http.Download
+    uri: "https://d37ci6vzurychx.cloudfront.net/trip-data/{{ render(vars.archivo) }}"
+
+  - id: subir_a_stage
+    type: io.kestra.plugin.jdbc.snowflake.Upload
+    from: "{{ outputs.descargar.uri }}"
+    stageName: "@NYC_TAXI.BRONZE.TLC_STAGE"
+    prefix: "yellow"
+    fileName: "{{ render(vars.archivo) }}"
+    compress: false
+
+  - id: cargar_bronze
+    type: io.kestra.plugin.jdbc.snowflake.Queries
+    sql: |
+      DELETE FROM NYC_TAXI.BRONZE.YELLOW_TRIPS
+      WHERE SOURCE_FILE = 'yellow/{{ render(vars.archivo) }}';
+
+      COPY INTO NYC_TAXI.BRONZE.YELLOW_TRIPS
+      FROM @NYC_TAXI.BRONZE.TLC_STAGE/yellow/
+      FILES = ('{{ render(vars.archivo) }}')
+      FILE_FORMAT = (FORMAT_NAME = 'NYC_TAXI.BRONZE.PARQUET_FF')
+      MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE
+      INCLUDE_METADATA = (SOURCE_FILE = METADATA$FILENAME, LOADED_AT = METADATA$START_SCAN_TIME)
+      FORCE = TRUE;
+
+  - id: limpiar_archivos
+    type: io.kestra.plugin.core.storage.PurgeCurrentExecutionFiles
+
+pluginDefaults:
+  - type: io.kestra.plugin.jdbc.snowflake.Queries
+    values:
+      url: "jdbc:snowflake://{{ envs.snowflake_account }}.snowflakecomputing.com/?warehouse={{ envs.snowflake_warehouse }}&db={{ envs.snowflake_database }}&role={{ envs.snowflake_role }}&MULTI_STATEMENT_COUNT=0"
+      username: "{{ envs.snowflake_user }}"
+      password: "{{ envs.snowflake_password }}"
+
+  - type: io.kestra.plugin.jdbc.snowflake.Upload
+    values:
+      url: "jdbc:snowflake://{{ envs.snowflake_account }}.snowflakecomputing.com/?warehouse={{ envs.snowflake_warehouse }}&db={{ envs.snowflake_database }}&role={{ envs.snowflake_role }}&MULTI_STATEMENT_COUNT=0"
+      username: "{{ envs.snowflake_user }}"
+      password: "{{ envs.snowflake_password }}"
+```
+
+Flow ingesta_yellow_todos:
+
+```yaml
+id: ingesta_yellow_todos
+namespace: lab1.nyc_taxi
+description: Carga en BRONZE los 20 meses de NYC Yellow Taxi (ene-2025 a ago-2026)
+
+tasks:
+  - id: por_cada_mes
+    type: io.kestra.plugin.core.flow.ForEach
+    concurrencyLimit: 2
+    values:
+      - "2025-01"
+      - "2025-02"
+      - "2025-03"
+      - "2025-04"
+      - "2025-05"
+      - "2025-06"
+      - "2025-07"
+      - "2025-08"
+      - "2025-09"
+      - "2025-10"
+      - "2025-11"
+      - "2025-12"
+      - "2026-01"
+      - "2026-02"
+      - "2026-03"
+      - "2026-04"
+      - "2026-05"
+      - "2026-06"
+      - "2026-07"
+      - "2026-08"
+    tasks:
+      - id: cargar_mes
+        type: io.kestra.plugin.core.flow.Subflow
+        namespace: lab1.nyc_taxi
+        flowId: ingesta_yellow_mes
+        inputs:
+          periodo: "{{ taskrun.value }}"
+        wait: true
+        transmitFailed: true
+        allowFailure: true
+```
+
+Ejecuta ingesta_yellow_todos (botón Execute). Cada ejecución de un mes hace lo siguiente:
 
 1. crear_objetos: crea el file format, el stage y la tabla BRONZE.YELLOW_TRIPS, si no existen.
 2. descargar: descarga yellow_tripdata_AAAA-MM.parquet desde el CDN de NYC TLC.
@@ -203,8 +354,8 @@ Ejecuta ingesta_yellow_todos. Cada ejecución de un mes hace lo siguiente:
 ### 6. Transformaciones con dbt (→ SILVER y GOLD)
 
 ```bash
-docker compose run --rm dbt debug   # comprueba la conexión ("All checks passed!")
-docker compose run --rm dbt build   # seeds + Silver + Gold + todos los tests
+docker compose run --rm dbt debug
+docker compose run --rm dbt build
 ```
 
 dbt build ejecuta todo en orden de dependencias: seeds → slv_yellow_trips → dimensiones → fact_trips,
