@@ -1,0 +1,12 @@
+# secretos
+.env
+
+# archivos de dbt que se generan solos
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
+
+# parquet descargados
+data/
+
+dbt/.user.yml

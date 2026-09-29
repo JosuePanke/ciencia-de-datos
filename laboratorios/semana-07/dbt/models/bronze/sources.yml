@@ -1,0 +1,20 @@
+version: 2
+
+sources:
+  - name: bronze
+    database: NYC_TAXI
+    schema: BRONZE
+    description: Datos crudos de NYC Yellow Taxi cargados por Kestra, sin transformar.
+    tables:
+      - name: yellow_trips
+        identifier: YELLOW_TRIPS
+        description: Un registro por viaje, tal como viene en los parquet de NYC TLC, más metadata de carga.
+        columns:
+          - name: source_file
+            description: Archivo parquet de origen (yellow/yellow_tripdata_AAAA-MM.parquet).
+            tests:
+              - not_null
+          - name: loaded_at
+            description: Momento en que se cargó el archivo en Snowflake.
+            tests:
+              - not_null

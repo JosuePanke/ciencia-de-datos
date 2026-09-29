@@ -1,0 +1,23 @@
+name: nyc_taxi
+version: "1.0.0"
+profile: nyc_taxi
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  nyc_taxi:
+    silver:
+      +schema: SILVER
+      +materialized: table
+    gold:
+      +schema: GOLD
+      +materialized: table
+
+seeds:
+  nyc_taxi:
+    +schema: SILVER

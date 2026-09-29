@@ -1,0 +1,37 @@
+version: 2
+
+models:
+  - name: dim_date
+    description: Calendario. Un registro por día (2025-01-01 a 2026-12-31).
+    columns:
+      - name: date_key
+        description: PK con formato AAAAMMDD.
+        data_tests: [unique, not_null]
+
+  - name: dim_zone
+    description: Zonas de taxi de NYC (TLC Taxi Zone Lookup). Se usa como zona de pickup y de dropoff.
+    columns:
+      - name: zone_id
+        description: PK. Corresponde a PULocationID / DOLocationID.
+        data_tests: [unique, not_null]
+
+  - name: dim_vendor
+    description: Proveedor del sistema del taxímetro.
+    columns:
+      - name: vendor_id
+        description: PK.
+        data_tests: [unique, not_null]
+
+  - name: dim_payment_type
+    description: Forma de pago del viaje.
+    columns:
+      - name: payment_type_id
+        description: PK.
+        data_tests: [unique, not_null]
+
+  - name: dim_rate_code
+    description: Tarifa aplicada al final del viaje.
+    columns:
+      - name: rate_code_id
+        description: PK.
+        data_tests: [unique, not_null]

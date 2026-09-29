@@ -1,0 +1,69 @@
+version: 2
+
+models:
+  - name: fact_trips
+    description: >
+      Hechos de viajes de NYC Yellow Taxi. Grano: un registro por viaje válido.
+      Fuente: SILVER.slv_yellow_trips.
+    columns:
+      - name: trip_id
+        description: PK del viaje.
+        data_tests: [unique, not_null]
+
+      - name: pickup_date_key
+        description: FK a dim_date (fecha de inicio del viaje).
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+
+      - name: vendor_id
+        description: FK a dim_vendor.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_vendor')
+                field: vendor_id
+
+      - name: pickup_zone_id
+        description: FK a dim_zone (zona de origen).
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_zone')
+                field: zone_id
+
+      - name: dropoff_zone_id
+        description: FK a dim_zone (zona de destino).
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_zone')
+                field: zone_id
+
+      - name: payment_type_id
+        description: FK a dim_payment_type.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_payment_type')
+                field: payment_type_id
+
+      - name: rate_code_id
+        description: FK a dim_rate_code.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_rate_code')
+                field: rate_code_id
+
+      - name: total_amount
+        description: Monto total cobrado (USD).
+        data_tests: [not_null]
